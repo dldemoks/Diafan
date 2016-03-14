@@ -11,7 +11,7 @@
 
 if (! defined('DIAFAN'))
 {
-	include dirname(dirname(dirname(dirname(dirname(__FILE__))))).'/includes/404.php';
+	include dirname(dirname(dirname(dirname(dirname(__FILE__))))) . '/includes/404.php';
 }
 
 if (empty($_REQUEST['m_orderid']))
@@ -23,11 +23,36 @@ if ($_GET["rewrite"] == "payeer/result")
 {
 	if (isset($_POST["m_operation_id"]) && isset($_POST["m_sign"]))
 	{
+		$err = false;
+		$message = '';
 		$pay = $this->diafan->_payment->check_pay($_POST['m_orderid'], 'payeer');
+
+		// запись логов
+
+		$log_text = 
+		"--------------------------------------------------------\n" .
+		"operation id		" . $_POST['m_operation_id'] . "\n" .
+		"operation ps		" . $_POST['m_operation_ps'] . "\n" .
+		"operation date		" . $_POST['m_operation_date'] . "\n" .
+		"operation pay date	" . $_POST['m_operation_pay_date'] . "\n" .
+		"shop				" . $_POST['m_shop'] . "\n" .
+		"order id			" . $_POST['m_orderid'] . "\n" .
+		"amount				" . $_POST['m_amount'] . "\n" .
+		"currency			" . $_POST['m_curr'] . "\n" .
+		"description		" . base64_decode($_POST['m_desc']) . "\n" .
+		"status				" . $_POST['m_status'] . "\n" .
+		"sign				" . $_POST['m_sign'] . "\n\n";
 		
-		$m_key = $pay['params']['m_key'];
+		$log_file = $pay['params']['payeer_pathlog'];
 		
-		$arHash = array(
+		if (!empty($log_file))
+		{
+			file_put_contents($_SERVER['DOCUMENT_ROOT'] . $log_file, $log_text, FILE_APPEND);
+		}	
+
+		// проверка цифровой подписи и ip
+
+		$sign_hash = strtoupper(hash('sha256', implode(":", array(
 			$_POST['m_operation_id'],
 			$_POST['m_operation_ps'],
 			$_POST['m_operation_date'],
@@ -38,103 +63,107 @@ if ($_GET["rewrite"] == "payeer/result")
 			$_POST['m_curr'],
 			$_POST['m_desc'],
 			$_POST['m_status'],
-			$m_key);
-		$sign_hash = strtoupper(hash('sha256', implode(":", $arHash)));
+			$pay['params']['m_key']
+		))));
 		
-		// проверка принадлежности ip списку доверенных ip
-		$list_ip_str = str_replace(' ', '', $pay['params']['payeer_ipfilter']);
+		$valid_ip = true;
+		$sIP = str_replace(' ', '', $pay['params']['payeer_ipfilter']);
 		
-		if (!empty($list_ip_str)) 
+		if (!empty($sIP))
 		{
-			$list_ip = explode(',', $list_ip_str);
-			$this_ip = $_SERVER['REMOTE_ADDR'];
-			$this_ip_field = explode('.', $this_ip);
-			$list_ip_field = array();
-			$i = 0;
-			$valid_ip = FALSE;
-			foreach ($list_ip as $ip)
+			$arrIP = explode('.', $_SERVER['REMOTE_ADDR']);
+			if (!preg_match('/(^|,)(' . $arrIP[0] . '|\*{1})(\.)' .
+			'(' . $arrIP[1] . '|\*{1})(\.)' .
+			'(' . $arrIP[2] . '|\*{1})(\.)' .
+			'(' . $arrIP[3] . '|\*{1})($|,)/', $sIP))
 			{
-				$ip_field[$i] = explode('.', $ip);
-				if ((($this_ip_field[0] ==  $ip_field[$i][0]) or ($ip_field[$i][0] == '*')) and
-					(($this_ip_field[1] ==  $ip_field[$i][1]) or ($ip_field[$i][1] == '*')) and
-					(($this_ip_field[2] ==  $ip_field[$i][2]) or ($ip_field[$i][2] == '*')) and
-					(($this_ip_field[3] ==  $ip_field[$i][3]) or ($ip_field[$i][3] == '*')))
-					{
-						$valid_ip = TRUE;
-						break;
-					}
-				$i++;
+				$valid_ip = false;
 			}
 		}
-		else
+		
+		if (!$valid_ip)
 		{
-			$valid_ip = TRUE;
+			$message .= " - ip-адрес сервера не является доверенным\n" .
+			"   доверенные ip: " . $sIP . "\n" .
+			"   ip текущего сервера: " . $_SERVER['REMOTE_ADDR'] . "\n";
+			$err = true;
+		}
+
+		if ($_POST['m_sign'] != $sign_hash)
+		{
+			$message .= " - не совпадают цифровые подписи\n";
+			$err = true;
 		}
 		
-		$log_text = 
-			"--------------------------------------------------------\n".
-			"operation id		".$_POST["m_operation_id"]."\n".
-			"operation ps		".$_POST["m_operation_ps"]."\n".
-			"operation date		".$_POST["m_operation_date"]."\n".
-			"operation pay date	".$_POST["m_operation_pay_date"]."\n".
-			"shop				".$_POST["m_shop"]."\n".
-			"order id			".$_POST["m_orderid"]."\n".
-			"amount				".$_POST["m_amount"]."\n".
-			"currency			".$_POST["m_curr"]."\n".
-			"description		".base64_decode($_POST["m_desc"])."\n".
-			"status				".$_POST["m_status"]."\n".
-			"sign				".$_POST["m_sign"]."\n\n";
-				
-		if (!empty($pay['params']['payeer_pathlog']))
-		{	
-			file_put_contents($_SERVER['DOCUMENT_ROOT'] . $pay['params']['payeer_pathlog'], $log_text, FILE_APPEND);
+		if (!$err)
+		{
+			$order_curr = ($pay['params']['m_curr'] == 'RUR') ? 'RUB' : $pay['params']['m_curr'];
+			$order_amount = number_format($pay['summ'], 2, '.', '');
+			
+			// проверка суммы и валюты
+		
+			if ($_POST['m_amount'] != $order_amount)
+			{
+				$message .= " - неправильная сумма\n";
+				$err = true;
+			}
+
+			if ($_POST['m_curr'] != $order_curr)
+			{
+				$message .= " - неправильная валюта\n";
+				$err = true;
+			}
+
+			// проверка статуса
+			
+			if (!$err)
+			{
+				switch ($_POST['m_status'])
+				{
+					case 'success':
+						$this->diafan->_payment->success($pay, 'pay');
+						break;
+						
+					default:
+						$message .= " - статус платежа не является success\n";
+						$err = true;
+						break;
+				}
+			}
 		}
 		
-		if ($_POST["m_sign"] == $sign_hash && $_POST['m_status'] == "success" && $valid_ip)
-		{
-			$this->diafan->_payment->success($pay, 'pay');
-			exit ($_POST['m_orderid'] . '|success');
-		}
-		else
+		if ($err)
 		{
 			$to = $pay['params']['payeer_emailerr'];
-			$subject = "Ошибка оплаты";
-			$message = "Не удалось провести платёж через систему Payeer по следующим причинам:\n\n";
-			
-			if ($_POST["m_sign"] != $sign_hash)
+
+			if (!empty($to))
 			{
-				$message .= " - Не совпадают цифровые подписи\n";
+				$message = "Не удалось провести платёж через систему Payeer по следующим причинам:\n\n" . $message . "\n" . $log_text;
+				$headers = "From: no-reply@" . $_SERVER['HTTP_HOST'] . "\r\n" . 
+				"Content-type: text/plain; charset=utf-8 \r\n";
+				mail($to, 'Ошибка оплаты', $message, $headers);
 			}
 			
-			if ($_POST['m_status'] != "success")
-			{
-				$message .= " - Cтатус платежа не является success\n";
-			}
-			
-			if (!$valid_ip)
-			{
-				$message .= " - ip-адрес сервера не является доверенным\n";
-				$message .= "   доверенные ip: " . $pay['params']['payeer_ipfilter'] . "\n";
-				$message .= "   ip текущего сервера: " . $_SERVER['REMOTE_ADDR'] . "\n";
-			}
-			
-			$message .= "\n" . $log_text;
-			$headers = "From: no-reply@" . $_SERVER['HTTP_SERVER'] . "\r\nContent-type: text/plain; charset=utf-8 \r\n";
-			mail($to, $subject, $message, $headers);
 			exit ($_POST['m_orderid'] . '|error');
+		}
+		else
+		{
+			exit ($_POST['m_orderid'] . '|success');
 		}
 	}
 }
 
 if ($_GET["rewrite"] == "payeer/success")
 {
-	$pay = $this->diafan->_payment->check_pay($_GET['m_orderid'], 'payeer');
+	$order_id = preg_replace('/[^a-zA-Z0-9_-]/', '', substr($_GET['m_orderid'], 0, 32));
+	$pay = $this->diafan->_payment->check_pay($order_id, 'payeer');
 	$this->diafan->_payment->success($pay, 'redirect');
 }
 
 if ($_GET["rewrite"] == "payeer/fail")
 {
-	$pay = $this->diafan->_payment->check_pay($_GET['m_orderid'], 'payeer');
+	$order_id = preg_replace('/[^a-zA-Z0-9_-]/', '', substr($_GET['m_orderid'], 0, 32));
+	$pay = $this->diafan->_payment->check_pay($order_id, 'payeer');
 	$this->diafan->_payment->fail($pay);
 }
 

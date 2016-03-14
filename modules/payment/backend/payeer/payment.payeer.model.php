@@ -11,7 +11,7 @@
 
 if (! defined('DIAFAN'))
 {
-	include dirname(dirname(dirname(dirname(dirname(__FILE__))))).'/includes/404.php';
+	include dirname(dirname(dirname(dirname(dirname(__FILE__))))) . '/includes/404.php';
 }
 
 class Payment_payeer_model extends Diafan
@@ -28,8 +28,8 @@ class Payment_payeer_model extends Diafan
 		$m_shop = $params['m_shop'];
 		$m_orderid = $pay['id'];
 		$m_amount = number_format($pay['summ'], 2, '.', '');
-		$m_curr = $params['m_curr'];
-		$m_desc = base64_encode($params['m_desc']);
+		$m_curr = $params['m_curr'] == 'RUR' ? 'RUB' : $params['m_curr'];
+		$m_desc = base64_encode($pay['details']['comment']);
 		$m_key = $params['m_key'];
 
 		$arHash = array(
