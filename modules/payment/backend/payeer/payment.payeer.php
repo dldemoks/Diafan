@@ -25,7 +25,8 @@ if ($_GET["rewrite"] == "payeer/result")
 	{
 		$err = false;
 		$message = '';
-		$pay = $this->diafan->_payment->check_pay($_POST['m_orderid'], 'payeer');
+		$order_id = preg_replace('/[^a-zA-Z0-9_-]/', '', substr($_POST['m_orderid'], 0, 32));
+		$pay = $this->diafan->_payment->check_pay($order_id, 'payeer');
 
 		// запись логов
 
