@@ -1,8 +1,8 @@
 Diafan
 ======
-Модуль оплаты Payeer
+Payment module Payeer
 
-Для установки скачайте все файлы.
-Далее следуйте инструкции.
+To install, download all the files.
+Then follow the instructions.
 
-Поддержка версии CMS Diafan 5.4 - 6.0
+Support for CMS Diafan 5.4 - 6.0
